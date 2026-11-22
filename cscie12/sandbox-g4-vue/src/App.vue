@@ -1,13 +1,14 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import ForecastCard from './components/ForecastCard.vue'
+import { getForecast } from './lib/openMeteo.js'
 
-// Boston, the location in the course Open-Meteo example.
-// Used when the browser cannot share a location.
+// A named place, used when the browser cannot share a location.
+// Same coordinates style as the class "near me" example.
 const FALLBACK = {
-  label: 'Boston (42.37, -71.12)',
-  latitude: 42.37,
-  longitude: -71.12,
+  name: 'Harvard Yard',
+  latitude: 42.3744665,
+  longitude: -71.1172096,
 }
 
 const days = ref([])
@@ -15,24 +16,40 @@ const placeLabel = ref('')
 const statusMessage = ref('Finding a location…')
 const errorMessage = ref('')
 
+let settled = false
+
 onMounted(() => {
+  // Our own timer. The timeout option on getCurrentPosition does not
+  // count time spent waiting on the permission prompt.
+  const timer = setTimeout(() => {
+    showForecast(FALLBACK.latitude, FALLBACK.longitude, FALLBACK.name)
+  }, 10000)
+
   if (!navigator.geolocation) {
-    loadForecast(FALLBACK.latitude, FALLBACK.longitude, FALLBACK.label)
+    clearTimeout(timer)
+    showForecast(FALLBACK.latitude, FALLBACK.longitude, FALLBACK.name)
     return
   }
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
+      clearTimeout(timer)
       const { latitude, longitude } = pos.coords
       const label = `Your location (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`
-      loadForecast(latitude, longitude, label)
+      showForecast(latitude, longitude, label)
     },
     () => {
-      loadForecast(FALLBACK.latitude, FALLBACK.longitude, FALLBACK.label)
+      clearTimeout(timer)
+      showForecast(FALLBACK.latitude, FALLBACK.longitude, FALLBACK.name)
     },
-    { timeout: 10000 },
   )
 })
+
+function showForecast(latitude, longitude, label) {
+  if (settled) return
+  settled = true
+  loadForecast(latitude, longitude, label)
+}
 
 async function loadForecast(latitude, longitude, label) {
   placeLabel.value = label
@@ -40,40 +57,13 @@ async function loadForecast(latitude, longitude, label) {
   errorMessage.value = ''
   days.value = []
 
-  const params = new URLSearchParams({
-    latitude,
-    longitude,
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
-    temperature_unit: 'fahrenheit',
-    timezone: 'auto',
-    forecast_days: 5,
-  })
-
   try {
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)
-    if (!response.ok) {
-      const body = await response.json()
-      throw new Error(body.reason || 'Weather request failed')
-    }
-    const data = await response.json()
-    // daily comes back as parallel arrays, one per variable.
-    // Index 0 of every array is the same day.
-    days.value = data.daily.time.map((date, i) => ({
-      date,
-      code: data.daily.weather_code[i],
-      high: roundTemp(data.daily.temperature_2m_max[i]),
-      low: roundTemp(data.daily.temperature_2m_min[i]),
-      precip: data.daily.precipitation_probability_max[i],
-    }))
+    days.value = await getForecast(latitude, longitude)
     statusMessage.value = ''
   } catch (err) {
     statusMessage.value = ''
     errorMessage.value = err.message
   }
-}
-
-function roundTemp(value) {
-  return value == null ? null : Math.round(value)
 }
 </script>
 
@@ -87,11 +77,9 @@ function roundTemp(value) {
     <main>
       <p v-if="statusMessage" class="status">{{ statusMessage }}</p>
       <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
-      <ul v-if="days.length" class="cards">
-        <li v-for="day in days" :key="day.date">
-          <ForecastCard :day="day" />
-        </li>
-      </ul>
+      <div v-if="days.length" class="days">
+        <ForecastCard v-for="day in days" :key="day.date" :day="day" />
+      </div>
     </main>
 
     <footer>
@@ -107,7 +95,7 @@ function roundTemp(value) {
 /* put global styles here */
 body {
   margin: 0;
-  font-family: helvetica, sans-serif;
+  font-family: system-ui, sans-serif;
   background: #eef2f6;
   color: #1c2834;
 }
@@ -117,21 +105,18 @@ body {
 .page {
   max-width: 980px;
   margin: 0 auto;
-  padding: 3.25rem 1rem 2.5rem;
+  padding: 3rem 1rem 2.5rem;
   text-align: center;
 }
 
 h1 {
   margin: 0;
-  font-size: 2.15rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+  font-size: 2rem;
 }
 
 .place {
-  margin: 0.55rem 0 0;
-  font-size: 1.2rem;
-  color: #3e4c5c;
+  margin: 0.5rem 0 0;
+  font-size: 1.15rem;
 }
 
 .status,
@@ -143,24 +128,17 @@ h1 {
   color: #9b2c2c;
 }
 
-.cards {
+.days {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 1rem;
-  list-style: none;
-  margin: 2.25rem 0 0;
-  padding: 0;
-}
-
-.cards li {
-  width: 168px;
+  margin-top: 2rem;
 }
 
 footer {
-  margin-top: 2.75rem;
+  margin-top: 2.5rem;
   color: #5c6b7a;
-  font-size: 0.98rem;
 }
 
 footer a {

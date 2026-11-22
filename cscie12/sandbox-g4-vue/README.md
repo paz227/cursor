@@ -1,7 +1,5 @@
 # ./cscie12-fall2026-g4-vue-weather
 
-A 5-day forecast for your location. The forecast comes from the [Open-Meteo](https://open-meteo.com/) API. If the browser cannot share a location, the page shows Boston.
-
 This template should help get you started developing with Vue 3 in Vite.
 
 ## Recommended IDE Setup
